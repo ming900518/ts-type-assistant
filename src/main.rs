@@ -1,24 +1,30 @@
+#![warn(clippy::all, clippy::nursery, clippy::pedantic, clippy::perf)]
+
 mod field_parser;
 mod processor;
 mod types;
 
 use swc_common::BytePos;
-use swc_ecma_ast::Module;
+use swc_ecma_ast::{EsVersion, Module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsConfig};
 
 use crate::types::Statement;
 
 fn main() {
-    TEST_INPUTS
-        .iter()
-        .for_each(|input| println!("{}\n\n", Statement::parse_module(parser(input))[0]))
+    for input in TEST_INPUTS {
+        println!("{}", Statement::parse_module(&parser(input))[0]);
+    }
 }
 
 fn parser(input: &str) -> Module {
     let lexer = Lexer::new(
         Syntax::Typescript(TsConfig::default()),
-        Default::default(),
-        StringInput::new(input, BytePos(0), BytePos(input.len() as u32)),
+        EsVersion::default(),
+        StringInput::new(
+            input,
+            BytePos(0),
+            BytePos(u32::try_from(input.len()).expect("Unable to convert usize to u32")),
+        ),
         None,
     );
     let mut parser = Parser::new_from(lexer);

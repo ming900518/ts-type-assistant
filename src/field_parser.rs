@@ -24,17 +24,13 @@ impl FieldParser for Box<TsType> {
                 ProcessedType::Optional(Box::new(optional.type_ann.parser()))
             }
             TsType::TsUnionOrIntersectionType(TsUnionOrIntersectionType::TsUnionType(union)) => {
-                ProcessedType::Union(union.types.iter().map(|element| element.parser()).collect())
+                ProcessedType::Union(union.types.iter().map(Self::parser).collect())
             }
             TsType::TsUnionOrIntersectionType(TsUnionOrIntersectionType::TsIntersectionType(
                 intersection,
-            )) => ProcessedType::Intersection(
-                intersection
-                    .types
-                    .iter()
-                    .map(|element| element.parser())
-                    .collect(),
-            ),
+            )) => {
+                ProcessedType::Intersection(intersection.types.iter().map(Self::parser).collect())
+            }
             TsType::TsTypeRef(type_ref) => ProcessedType::TypeReference(match type_ref.type_name {
                 TsEntityName::Ident(ident) => ident.sym.to_string(),
                 TsEntityName::TsQualifiedName(qualified) => qualified.right.sym.to_string(),
@@ -54,7 +50,7 @@ impl FieldParser for Box<TsType> {
                 type_literal
                     .members
                     .iter()
-                    .flat_map(|member| {
+                    .filter_map(|member| {
                         if let TsTypeElement::TsPropertySignature(property) = member {
                             let is_optional = property.optional;
                             let name = property

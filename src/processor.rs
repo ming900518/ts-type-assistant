@@ -1,4 +1,5 @@
 use crate::field_parser::FieldParser;
+use swc_common::Span;
 use swc_ecma_ast::{
     ClassDecl, ClassMember::ClassProp, TsInterfaceDecl, TsKeywordType, TsKeywordTypeKind, TsType,
     TsTypeAliasDecl,
@@ -17,7 +18,7 @@ impl Processor for ClassDecl {
             .class
             .body
             .iter()
-            .flat_map(|member| {
+            .filter_map(|member| {
                 if let ClassProp(prop) = member {
                     let (name, is_optional) = prop
                         .key
@@ -28,11 +29,13 @@ impl Processor for ClassDecl {
                     let data_type = prop
                         .type_ann
                         .clone()
-                        .map(|ann| ann.type_ann)
-                        .unwrap_or(Box::new(TsType::TsKeywordType(TsKeywordType {
-                            span: Default::default(),
-                            kind: TsKeywordTypeKind::TsAnyKeyword,
-                        })))
+                        .map_or(
+                            Box::new(TsType::TsKeywordType(TsKeywordType {
+                                span: Span::default(),
+                                kind: TsKeywordTypeKind::TsAnyKeyword,
+                            })),
+                            |ann| ann.type_ann,
+                        )
                         .parser();
                     Some(Field {
                         name,
@@ -58,7 +61,7 @@ impl Processor for Box<TsInterfaceDecl> {
             .body
             .body
             .iter()
-            .flat_map(|property| {
+            .filter_map(|property| {
                 property.clone().ts_property_signature().map(|signature| {
                     let Some(name) = signature.key.ident().map(|ident| ident.sym.to_string()) else {
                         return None;
@@ -70,8 +73,8 @@ impl Processor for Box<TsInterfaceDecl> {
 
                     Some(Field{
                         name,
+                        data_type,
                         is_optional,
-                        data_type
                     })
                 }).unwrap_or_default()
             })
@@ -94,7 +97,7 @@ impl Processor for Box<TsTypeAliasDecl> {
                 type_literal
                     .members
                     .iter()
-                    .flat_map(|property| {
+                    .filter_map(|property| {
                         property.clone().ts_property_signature().map(|signature| {
                             let Some(name) = signature.key.ident().map(|ident| ident.sym.to_string()) else {
                                 return None;
@@ -106,8 +109,8 @@ impl Processor for Box<TsTypeAliasDecl> {
 
                             Some(Field{
                                 name,
+                                data_type,
                                 is_optional,
-                                data_type
                             })
                         }).unwrap_or_default()
                     })

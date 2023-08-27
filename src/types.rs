@@ -18,17 +18,17 @@ pub struct Statement {
 
 impl Statement {
     pub fn default_type_alias(name: String) -> Self {
-        Statement {
+        Self {
             structure_type: StructureType::TypeAlias,
             name,
             fields: Vec::default(),
         }
     }
-    pub fn parse_module(module: Module) -> Vec<Self> {
+    pub fn parse_module(module: &Module) -> Vec<Self> {
         module
             .body
             .iter()
-            .flat_map(|body| {
+            .filter_map(|body| {
                 if let Stmt(Decl(statement)) = body {
                     match statement {
                         Class(class) => Some(class.process()),
@@ -60,7 +60,7 @@ impl Display for Statement {
             if field_content.is_empty() {
                 "No fields available.".to_string()
             } else {
-                format!("Fields：\n{}", field_content)
+                format!("Fields：\n{field_content}")
             }
         )
     }
@@ -133,7 +133,7 @@ impl ProcessedType {
                 "Tuple of {}",
                 inner_values
                     .iter()
-                    .map(|inner_value| inner_value.value())
+                    .map(Self::value)
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
@@ -142,7 +142,7 @@ impl ProcessedType {
                 "Union of {}",
                 inner_values
                     .iter()
-                    .map(|inner_value| inner_value.value())
+                    .map(Self::value)
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
@@ -150,12 +150,12 @@ impl ProcessedType {
                 "Intersection of {}",
                 inner_values
                     .iter()
-                    .map(|inner_value| inner_value.value())
+                    .map(Self::value)
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
             Self::TypeReference(type_name) => type_name.clone(),
-            Self::Import(type_import) => format!("Import with `{}`", type_import),
+            Self::Import(type_import) => format!("Import with `{type_import}`"),
             Self::TypeLiteral(inner_fields) => format!(
                 "Object Literal {{{}}}",
                 inner_fields
@@ -177,7 +177,7 @@ impl ProcessedType {
             Self::Never => String::from("Never"),
             Self::Intrinsic => String::from("Intrinsic"),
             Self::Boolean => String::from("Boolean"),
-            Self::Other(raw_type) => format!("Other type: {:?}", raw_type),
+            Self::Other(raw_type) => format!("Other type: {raw_type:?}"),
         }
     }
 }
