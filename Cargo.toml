@@ -1,0 +1,9 @@
+[package]
+name = "ts-type-assistant"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+swc_common = {version = "*", features = ["tty-emitter", "sourcemap", "ahash"]}
+swc_ecma_parser = {version = "*", features = ["typescript", "verify"]}
+swc_ecma_ast = {version = "*"}
