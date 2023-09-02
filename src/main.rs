@@ -1,7 +1,7 @@
 #![warn(clippy::all, clippy::nursery, clippy::pedantic, clippy::perf)]
 
-mod field_parser;
 mod processor;
+mod type_parser;
 mod types;
 
 use swc_common::BytePos;
@@ -11,15 +11,18 @@ use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsConfig};
 use crate::types::Statement;
 
 fn main() {
-    for input in TEST_INPUTS {
-        println!("{}", Statement::parse_module(&parser(input))[0]);
+    let input = r"type Janitor =
+  | { kind: 'test1' }
+  | { kind: 'test2'; partnerId: string }| `test${AAA}`";
+    for statement in Statement::parse_module(&parser(input)) {
+        println!("{statement}");
     }
 }
 
 fn parser(input: &str) -> Module {
     let lexer = Lexer::new(
         Syntax::Typescript(TsConfig::default()),
-        EsVersion::default(),
+        EsVersion::latest(),
         StringInput::new(
             input,
             BytePos(0),
@@ -33,6 +36,7 @@ fn parser(input: &str) -> Module {
         .expect("failed to parse module")
 }
 
+#[allow(dead_code)]
 const TEST_INPUTS: [&str; 4] = [
     "type TestWithTypeAliasToClass = Map<string, string>",
     r"type TestWithTypeAliasToObjectLiteral = {

@@ -1,4 +1,4 @@
-use crate::field_parser::FieldParser;
+use crate::{type_parser::TypeParser, types::Content};
 use swc_common::Span;
 use swc_ecma_ast::{
     ClassDecl, ClassMember::ClassProp, TsInterfaceDecl, TsKeywordType, TsKeywordTypeKind, TsType,
@@ -46,11 +46,15 @@ impl Processor for ClassDecl {
                     None
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
         Statement {
             structure_type: StructureType::Class,
             name,
-            fields,
+            content: if fields.is_empty() {
+                Content::NoContents
+            } else {
+                Content::Fields(fields)
+            },
         }
     }
 }
@@ -82,7 +86,11 @@ impl Processor for Box<TsInterfaceDecl> {
         Statement {
             structure_type: StructureType::Interface,
             name,
-            fields,
+            content: if fields.is_empty() {
+                Content::NoContents
+            } else {
+                Content::Fields(fields)
+            },
         }
     }
 }
@@ -115,14 +123,16 @@ impl Processor for Box<TsTypeAliasDecl> {
                         }).unwrap_or_default()
                     })
                     .collect::<Vec<Field>>()
-            );
-        match fields {
-            Some(fields) => Statement {
-                structure_type: StructureType::TypeAlias,
-                name,
-                fields,
+            ).unwrap_or_default();
+        println!("{self:#?}");
+        Statement {
+            structure_type: StructureType::TypeAlias,
+            name,
+            content: if fields.is_empty() {
+                todo!("");
+            } else {
+                Content::Fields(fields)
             },
-            None => Statement::default_type_alias(name),
         }
     }
 }

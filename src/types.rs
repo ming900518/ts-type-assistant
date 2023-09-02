@@ -13,17 +13,10 @@ use swc_ecma_ast::{
 pub struct Statement {
     pub structure_type: StructureType,
     pub name: String,
-    pub fields: Vec<Field>,
+    pub content: Content,
 }
 
 impl Statement {
-    pub fn default_type_alias(name: String) -> Self {
-        Self {
-            structure_type: StructureType::TypeAlias,
-            name,
-            fields: Vec::default(),
-        }
-    }
     pub fn parse_module(module: &Module) -> Vec<Self> {
         module
             .body
@@ -46,24 +39,32 @@ impl Statement {
 
 impl Display for Statement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let field_content = self
-            .fields
-            .iter()
-            .map(|field| format!("{field}"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let content = match self.content {
+            Content::Fields(ref fields) => {
+                format!(
+                    "Fields: \n{}",
+                    fields
+                        .iter()
+                        .map(|field| format!("{field}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
+            Content::AliasOfTypes => String::from("Alias"),
+            Content::NoContents => String::from("No fields or alias detail available."),
+        };
         write!(
             f,
-            "\nInput Name：{}\nType of Structure：{}\n{}",
-            self.name,
-            self.structure_type,
-            if field_content.is_empty() {
-                "No fields available.".to_string()
-            } else {
-                format!("Fields：\n{field_content}")
-            }
+            "Input Name：{}\nType of Structure：{}\n{}",
+            self.name, self.structure_type, content
         )
     }
+}
+
+pub enum Content {
+    Fields(Vec<Field>),
+    AliasOfTypes,
+    NoContents,
 }
 
 pub struct Field {
@@ -109,6 +110,7 @@ pub enum ProcessedType {
     TypeReference(String),
     Import(String),
     TypeLiteral(Vec<Field>),
+    //Literal(LiteralType),
     Any,
     Unknown,
     Number,
@@ -186,4 +188,11 @@ impl Display for ProcessedType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.value())
     }
+}
+
+enum LiteralType {
+    String(String),
+    Boolean(bool),
+    Number(f64),
+    //TemplateLiteral(),
 }

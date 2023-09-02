@@ -7,3 +7,5 @@ edition = "2021"
 swc_common = {version = "*", features = ["tty-emitter", "sourcemap", "ahash"]}
 swc_ecma_parser = {version = "*", features = ["typescript", "verify"]}
 swc_ecma_ast = {version = "*"}
+jsdoc = {version = "*", features = ["serde"]}
+serde = {version = "*", features = ["derive"]}

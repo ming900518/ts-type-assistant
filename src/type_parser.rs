@@ -5,11 +5,11 @@ use swc_ecma_ast::{
 
 use crate::types::{Field, ProcessedType};
 
-pub trait FieldParser {
+pub trait TypeParser {
     fn parser(&self) -> ProcessedType;
 }
 
-impl FieldParser for Box<TsType> {
+impl TypeParser for Box<TsType> {
     fn parser(&self) -> ProcessedType {
         match *self.clone() {
             TsType::TsArrayType(array) => ProcessedType::Array(Box::new(array.elem_type.parser())),
