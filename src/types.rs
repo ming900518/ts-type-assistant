@@ -7,7 +7,7 @@ use swc_ecma_ast::{
     Module,
     ModuleItem::Stmt,
     Stmt::Decl,
-    TsType,
+    TsIntersectionType, TsType, TsUnionOrIntersectionType, TsUnionType,
 };
 
 pub struct Statement {
@@ -50,7 +50,26 @@ impl Display for Statement {
                         .join("\n")
                 )
             }
-            Content::AliasOfTypes => String::from("Alias"),
+            Content::UnionTypes(ref types) => {
+                format!(
+                    "Union Type: \n{}",
+                    types
+                        .iter()
+                        .map(|field| format!("{field}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
+            Content::IntersectionTypes(ref types) => {
+                format!(
+                    "Intersection Type: \n{}",
+                    types
+                        .iter()
+                        .map(|field| format!("{field}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
             Content::NoContents => String::from("No fields or alias detail available."),
         };
         write!(
@@ -63,7 +82,8 @@ impl Display for Statement {
 
 pub enum Content {
     Fields(Vec<Field>),
-    AliasOfTypes,
+    UnionTypes(Vec<ProcessedType>),
+    IntersectionTypes(Vec<ProcessedType>),
     NoContents,
 }
 
@@ -110,7 +130,7 @@ pub enum ProcessedType {
     TypeReference(String),
     Import(String),
     TypeLiteral(Vec<Field>),
-    //Literal(LiteralType),
+    LiteralTypes(LiteralType),
     Any,
     Unknown,
     Number,
@@ -166,6 +186,7 @@ impl ProcessedType {
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
+            Self::LiteralTypes(types) => format!("Literal {types}",),
             Self::Any => String::from("Any"),
             Self::Unknown => String::from("Unknown"),
             Self::Number => String::from("Number"),
@@ -190,9 +211,53 @@ impl Display for ProcessedType {
     }
 }
 
-enum LiteralType {
+#[allow(clippy::vec_box)]
+pub trait Sum {
+    fn get_fields(&self) -> Vec<Box<TsType>>;
+}
+impl Sum for TsUnionOrIntersectionType {
+    fn get_fields(&self) -> Vec<Box<TsType>> {
+        match self {
+            Self::TsUnionType(union) => union.get_fields(),
+            Self::TsIntersectionType(intersection) => intersection.get_fields(),
+        }
+    }
+}
+impl Sum for TsUnionType {
+    fn get_fields(&self) -> Vec<Box<TsType>> {
+        self.clone().types
+    }
+}
+impl Sum for TsIntersectionType {
+    fn get_fields(&self) -> Vec<Box<TsType>> {
+        self.clone().types
+    }
+}
+
+pub enum LiteralType {
     String(String),
     Boolean(bool),
     Number(f64),
-    //TemplateLiteral(),
+    BigInt(String),
+    Template(Vec<ProcessedType>),
+}
+
+impl Display for LiteralType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::String(ref str) => write!(f, "String \"{str}\""),
+            Self::Boolean(ref bool) => write!(f, "Boolean {bool}"),
+            Self::Number(ref num) => write!(f, "Number {num}"),
+            Self::BigInt(ref bigint) => write!(f, "BigInt {bigint}"),
+            Self::Template(ref template) => write!(
+                f,
+                "{}",
+                template
+                    .iter()
+                    .map(|inner_value| format!("{inner_value}"))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+        }
+    }
 }

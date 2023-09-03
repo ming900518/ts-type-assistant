@@ -1,8 +1,11 @@
-use crate::{type_parser::TypeParser, types::Content};
+use crate::{
+    type_parser::TypeParser,
+    types::{Content, ProcessedType, Sum},
+};
 use swc_common::Span;
 use swc_ecma_ast::{
     ClassDecl, ClassMember::ClassProp, TsInterfaceDecl, TsKeywordType, TsKeywordTypeKind, TsType,
-    TsTypeAliasDecl,
+    TsTypeAliasDecl, TsUnionOrIntersectionType,
 };
 
 use crate::types::{Field, Statement, StructureType};
@@ -66,21 +69,27 @@ impl Processor for Box<TsInterfaceDecl> {
             .body
             .iter()
             .filter_map(|property| {
-                property.clone().ts_property_signature().map(|signature| {
-                    let Some(name) = signature.key.ident().map(|ident| ident.sym.to_string()) else {
-                        return None;
-                    };
-                    let is_optional = signature.optional;
-                    let Some(data_type) = signature.type_ann.map(|ann| ann.type_ann.parser()) else {
-                        return None;
-                    };
+                property
+                    .clone()
+                    .ts_property_signature()
+                    .map(|signature| {
+                        let Some(name) = signature.key.ident().map(|ident| ident.sym.to_string())
+                        else {
+                            return None;
+                        };
+                        let is_optional = signature.optional;
+                        let Some(data_type) = signature.type_ann.map(|ann| ann.type_ann.parser())
+                        else {
+                            return None;
+                        };
 
-                    Some(Field{
-                        name,
-                        data_type,
-                        is_optional,
+                        Some(Field {
+                            name,
+                            data_type,
+                            is_optional,
+                        })
                     })
-                }).unwrap_or_default()
+                    .unwrap_or_default()
             })
             .collect::<Vec<Field>>();
         Statement {
@@ -97,42 +106,58 @@ impl Processor for Box<TsInterfaceDecl> {
 impl Processor for Box<TsTypeAliasDecl> {
     fn process(&self) -> Statement {
         let name = self.id.sym.to_string();
-        let fields = self
-            .clone()
-            .type_ann
-            .ts_type_lit()
-            .map(|type_literal|
-                type_literal
+        let content = match &*self.clone().type_ann {
+            TsType::TsTypeLit(type_literal) => {
+                let fields = type_literal
                     .members
                     .iter()
                     .filter_map(|property| {
-                        property.clone().ts_property_signature().map(|signature| {
-                            let Some(name) = signature.key.ident().map(|ident| ident.sym.to_string()) else {
-                                return None;
-                            };
-                            let is_optional = signature.optional;
-                            let Some(data_type) = signature.type_ann.map(|ann| ann.type_ann.parser()) else {
-                                return None;
-                            };
+                        property
+                            .clone()
+                            .ts_property_signature()
+                            .map(|signature| {
+                                let Some(name) =
+                                    signature.key.ident().map(|ident| ident.sym.to_string())
+                                else {
+                                    return None;
+                                };
+                                let is_optional = signature.optional;
+                                let Some(data_type) =
+                                    signature.type_ann.map(|ann| ann.type_ann.parser())
+                                else {
+                                    return None;
+                                };
 
-                            Some(Field{
-                                name,
-                                data_type,
-                                is_optional,
+                                Some(Field {
+                                    name,
+                                    data_type,
+                                    is_optional,
+                                })
                             })
-                        }).unwrap_or_default()
+                            .unwrap_or_default()
                     })
-                    .collect::<Vec<Field>>()
-            ).unwrap_or_default();
-        println!("{self:#?}");
+                    .collect::<Vec<Field>>();
+                Content::Fields(fields)
+            }
+            TsType::TsUnionOrIntersectionType(content) => {
+                let types = content
+                    .get_fields()
+                    .iter()
+                    .map(TypeParser::parser)
+                    .collect::<Vec<ProcessedType>>();
+                match content {
+                    TsUnionOrIntersectionType::TsUnionType(_) => Content::UnionTypes(types),
+                    TsUnionOrIntersectionType::TsIntersectionType(_) => {
+                        Content::IntersectionTypes(types)
+                    }
+                }
+            }
+            _ => Content::NoContents,
+        };
         Statement {
             structure_type: StructureType::TypeAlias,
             name,
-            content: if fields.is_empty() {
-                todo!("");
-            } else {
-                Content::Fields(fields)
-            },
+            content,
         }
     }
 }

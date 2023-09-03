@@ -1,9 +1,9 @@
 use swc_ecma_ast::{
-    TsEntityName, TsKeywordTypeKind, TsType, TsTypeElement, TsTypeQueryExpr,
+    TsEntityName, TsKeywordTypeKind, TsLit, TsType, TsTypeElement, TsTypeQueryExpr,
     TsUnionOrIntersectionType,
 };
 
-use crate::types::{Field, ProcessedType};
+use crate::types::{Field, LiteralType, ProcessedType};
 
 pub trait TypeParser {
     fn parser(&self) -> ProcessedType;
@@ -73,6 +73,15 @@ impl TypeParser for Box<TsType> {
                     })
                     .collect(),
             ),
+            TsType::TsLitType(lit) => ProcessedType::LiteralTypes(match lit.lit {
+                TsLit::Number(num) => LiteralType::Number(num.value),
+                TsLit::Str(str) => LiteralType::String(str.value.to_string()),
+                TsLit::Bool(bool) => LiteralType::Boolean(bool.value),
+                TsLit::BigInt(bigint) => LiteralType::BigInt(bigint.value.to_string()),
+                TsLit::Tpl(tpl) => {
+                    LiteralType::Template(tpl.types.iter().map(TypeParser::parser).collect())
+                }
+            }),
             TsType::TsImportType(import) => ProcessedType::Import(import.arg.value.to_string()),
             TsType::TsKeywordType(keyword) => match keyword.kind {
                 TsKeywordTypeKind::TsAnyKeyword => ProcessedType::Any,
