@@ -7,8 +7,8 @@ interface TestWithInterface {
     arrayField: any[];
     tupleField: [string, boolean];
     unionField: string | null;
-    intersectionField: { data1: string } & { data2: string };
+    intersectionField: { data1: string; data2: string } & { data2: string };
     jsObjectField: Map<string, string>;
     queryField: typeof SomeType;
-    arrayWithOptionalField: [boolean, string?];
+    arrayWithOptionalField: [string?][];
 }
