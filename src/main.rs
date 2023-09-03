@@ -4,19 +4,76 @@ mod processor;
 mod type_parser;
 mod types;
 
+use lsp_types::{
+    Hover, HoverContents, HoverParams, HoverProviderCapability, MarkupContent, MarkupKind,
+    ServerCapabilities, ServerInfo,
+};
 use swc_common::BytePos;
 use swc_ecma_ast::{EsVersion, Module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsConfig};
+use tower_lsp::{
+    lsp_types::{InitializeParams, InitializeResult, InitializedParams, MessageType},
+    Client, LanguageServer, LspService, Server,
+};
 
 use crate::types::Statement;
 
-fn main() {
-    let input = r"type Janitor =
-  | { kind: 'test1' }
-  | { kind: 'test2'; partnerId: string }| `test${AAA}`";
-    for statement in Statement::parse_module(&parser(input)) {
-        println!("{statement}");
+struct Backend {
+    client: Client,
+}
+
+#[tower_lsp::async_trait]
+impl LanguageServer for Backend {
+    async fn initialize(
+        &self,
+        _: InitializeParams,
+    ) -> tower_lsp::jsonrpc::Result<InitializeResult> {
+        Ok(InitializeResult {
+            server_info: Some(ServerInfo {
+                name: "TypeScript Type Assistant".to_string(),
+                version: None,
+            }),
+            capabilities: ServerCapabilities {
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                ..ServerCapabilities::default()
+            },
+        })
     }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client
+            .log_message(MessageType::ERROR, "TypeScript Type Assistant initialized.")
+            .await;
+        self.client
+            .log_message(MessageType::ERROR, "Ming Chang <mail@mingchang.tw> 2023")
+            .await;
+    }
+
+    async fn hover(&self, param: HoverParams) -> tower_lsp::jsonrpc::Result<Option<Hover>> {
+        self.client
+            .log_message(MessageType::ERROR, format!("Hover:\n{param:#?}"))
+            .await;
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::PlainText,
+                value: String::new(),
+            }),
+            range: None,
+        }))
+    }
+
+    async fn shutdown(&self) -> tower_lsp::jsonrpc::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let (service, socket) = LspService::new(|client| Backend { client });
+    Server::new(stdin, stdout, socket).serve(service).await;
 }
 
 fn parser(input: &str) -> Module {
@@ -35,52 +92,3 @@ fn parser(input: &str) -> Module {
         .parse_typescript_module()
         .expect("failed to parse module")
 }
-
-#[allow(dead_code)]
-const TEST_INPUTS: [&str; 4] = [
-    "type TestWithTypeAliasToClass = Map<string, string>",
-    r"type TestWithTypeAliasToObjectLiteral = {
-    stringField: string,
-    numberField: number,
-    boolField: boolean,
-    anyField1: any,
-    anyField2,
-    arrayField: any[],
-    tupleField: [string, boolean],
-    unionField: string | null,
-    intersectionField: {data1: string} & {data2: string},
-    jsObjectField: Map<string, string>,
-    queryField: typeof SomeType,
-    arrayWithOptionalField: [boolean, string?]
-}",
-    r"interface TestWithInterface {
-    stringField: string;
-    numberField: number;
-    boolField: boolean;
-    anyField1: any;
-    anyField2;
-    arrayField: any[];
-    tupleField: [string, boolean];
-    unionField: string | null;
-    intersectionField: {data1: string} & {data2: string};
-    jsObjectField: Map<string, string>;
-    queryField: typeof SomeType;
-    arrayWithOptionalField: [boolean, string?];
-}",
-    r"class TestWithClass {
-    stringField: string;
-    numberField: number;
-    boolField: boolean;
-    anyField1: any;
-    anyField2;
-    arrayField: any[];
-    tupleField: [string, boolean];
-    unionField: string | null;
-    intersectionField: {data1: string} & {data2: string};
-    jsObjectField: Map<string, string>;
-    queryField: typeof SomeType;
-    arrayWithOptionalField: [boolean, string?];
-
-    constructor() {}
-}",
-];

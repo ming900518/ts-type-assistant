@@ -9,3 +9,7 @@ swc_ecma_parser = {version = "*", features = ["typescript", "verify"]}
 swc_ecma_ast = {version = "*"}
 jsdoc = {version = "*", features = ["serde"]}
 serde = {version = "*", features = ["derive"]}
+tower-lsp = {version = "*"}
+tokio = { version = "*", features = ["full"] }
+tower = { version = "*", features = ["tokio"] }
+lsp-types = "*"
