@@ -1,132 +1,49 @@
-use std::fmt::Display;
-
-use crate::processor::Processor;
-
-use swc_ecma_ast::{
-    Decl::{Class, TsInterface, TsTypeAlias},
-    Module,
-    ModuleItem::Stmt,
-    Stmt::Decl,
-    TsIntersectionType, TsType, TsUnionOrIntersectionType, TsUnionType,
+use std::{
+    error::Error,
+    io,
+    ops::Deref,
+    path::{Path, PathBuf},
 };
 
-pub struct Statement {
-    pub structure_type: StructureType,
-    pub name: String,
-    pub content: Content,
-}
+use oxc::ast::ast::{
+    ClassElement, Declaration, PropertyDefinition, PropertyKey, TSLiteral, TSLiteralType,
+    TSPropertySignature, TSSignature, TSTupleElement, TSType,
+};
 
-impl Statement {
-    pub fn parse_module(module: &Module) -> Vec<Self> {
-        module
-            .body
-            .iter()
-            .filter_map(|body| {
-                if let Stmt(Decl(statement)) = body {
-                    match statement {
-                        Class(class) => Some(class.process()),
-                        TsInterface(interface) => Some(interface.process()),
-                        TsTypeAlias(type_alias) => Some(type_alias.process()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-}
+#[derive(Debug)]
+pub struct ParsedStructure(pub StructureInfo, pub Fields);
 
-impl Display for Statement {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let content = match self.content {
-            Content::Fields(ref fields) => {
-                format!(
-                    "欄位: \n{}",
-                    fields
-                        .iter()
-                        .map(|field| format!("{field}"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            }
-            Content::UnionTypes(ref types) => {
-                format!(
-                    "聯集型別（Union Type）代稱: \n{}",
-                    types
-                        .iter()
-                        .map(|field| format!("{field}"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            }
-            Content::IntersectionTypes(ref types) => {
-                format!(
-                    "交集型別（Intersection Type）代稱： \n{}",
-                    types
-                        .iter()
-                        .map(|field| format!("{field}"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            }
-            Content::NoContents => String::from("無欄位或型別代稱存在"),
+impl ParsedStructure {
+    pub fn try_new(declaration: Declaration, path: &Path) -> Result<Self, Box<dyn Error>> {
+        let structure_info = StructureInfo {
+            struct_name: StructureName::try_from(&declaration)?,
+            struct_type: StructureType::try_from(&declaration)?,
+            file_path: path.to_path_buf(),
         };
-        write!(f, "{} - {}\n\n{}", self.name, self.structure_type, content)
+
+        let fields = Fields::try_from(declaration)?;
+
+        Ok(Self(structure_info, fields))
     }
 }
 
-pub enum Content {
-    Fields(Vec<Field>),
-    UnionTypes(Vec<ProcessedType>),
-    IntersectionTypes(Vec<ProcessedType>),
-    NoContents,
+#[derive(Hash, PartialEq, Eq, Debug)]
+pub struct StructureInfo {
+    struct_name: StructureName,
+    struct_type: StructureType,
+    file_path: PathBuf,
 }
 
-pub struct Field {
-    pub name: String,
-    pub data_type: ProcessedType,
-    pub is_optional: bool,
-}
-
-impl Display for Field {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}: {}",
-            self.name,
-            if self.is_optional { " - 非必填" } else { "" },
-            self.data_type
-        )
-    }
-}
-
-pub enum StructureType {
-    Class,
-    Interface,
-    TypeAlias,
-}
-
-impl Display for StructureType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Class => write!(f, "類別（Class）"),
-            Self::Interface => write!(f, "介面（Interface）"),
-            Self::TypeAlias => write!(f, "型別代稱（Type Alias）"),
-        }
-    }
-}
-
-pub enum ProcessedType {
-    Array(Box<ProcessedType>),
-    Tuple(Vec<ProcessedType>),
-    Optional(Box<ProcessedType>),
-    Union(Vec<ProcessedType>),
-    Intersection(Vec<ProcessedType>),
-    TypeReference(String),
-    Import(String),
-    TypeLiteral(Vec<Field>),
+#[derive(Debug, Default)]
+pub enum DataType {
+    Array(Box<DataType>),
+    Tuple(Vec<DataType>),
+    Optional(Box<DataType>),
+    Union(Vec<DataType>),
+    Intersection(Vec<DataType>),
+    TypeLiteral(Fields),
     LiteralTypes(LiteralType),
+    #[default]
     Any,
     Unknown,
     Number,
@@ -138,122 +55,268 @@ pub enum ProcessedType {
     Undefined,
     Null,
     Never,
-    Intrinsic,
     Boolean,
-    Other(Box<TsType>),
+    Other,
 }
 
-impl ProcessedType {
-    fn value(&self) -> String {
-        match self {
-            Self::Array(inner_value) => format!("{}的陣列（Array）", inner_value.value()),
-            Self::Tuple(inner_values) => format!(
-                "{}的元組（Tuple）",
-                inner_values
-                    .iter()
-                    .map(Self::value)
-                    .collect::<Vec<String>>()
-                    .join(", ")
+impl From<TSType<'_>> for DataType {
+    fn from(value: TSType) -> Self {
+        match value {
+            TSType::TSAnyKeyword(_) => Self::Any,
+            TSType::TSBigIntKeyword(_) => Self::BigInt,
+            TSType::TSBooleanKeyword(_) => Self::Boolean,
+            TSType::TSNeverKeyword(_) => Self::Never,
+            TSType::TSNullKeyword(_) => Self::Null,
+            TSType::TSNumberKeyword(_) => Self::Number,
+            TSType::TSObjectKeyword(_) => Self::Object,
+            TSType::TSStringKeyword(_) => Self::String,
+            TSType::TSSymbolKeyword(_) => Self::Symbol,
+            TSType::TSUndefinedKeyword(_) => Self::Undefined,
+            TSType::TSUnknownKeyword(_) => Self::Unknown,
+            TSType::TSVoidKeyword(_) => Self::Void,
+            TSType::TSArrayType(array) => {
+                Self::Array(Box::new(Self::from(array.unbox().element_type)))
+            }
+            TSType::TSIntersectionType(intersection) => Self::Intersection(
+                intersection
+                    .unbox()
+                    .types
+                    .into_iter()
+                    .map(Self::from)
+                    .collect(),
             ),
-            Self::Optional(inner_value) => format!("{}（非必填）", inner_value.value()),
-            Self::Union(inner_values) => format!(
-                "{}的聯集（Union）",
-                inner_values
-                    .iter()
-                    .map(Self::value)
-                    .collect::<Vec<String>>()
-                    .join("、")
+            TSType::TSTupleType(tuple) => Self::Tuple(
+                tuple
+                    .unbox()
+                    .element_types
+                    .into_iter()
+                    .map(|tuple_element| match tuple_element {
+                        TSTupleElement::TSType(ts_types) => Self::from(ts_types),
+                        TSTupleElement::TSOptionalType(optional_types) => Self::Optional(Box::new(
+                            Self::from(optional_types.unbox().type_annotation),
+                        )),
+                        _ => Self::Other,
+                    })
+                    .collect(),
             ),
-            Self::Intersection(inner_values) => format!(
-                "{}的交集（Intersection）",
-                inner_values
-                    .iter()
-                    .map(Self::value)
-                    .collect::<Vec<String>>()
-                    .join("、")
-            ),
-            Self::TypeReference(type_name) => format!("{}類別", type_name.clone()),
-            Self::Import(type_import) => format!("由`{type_import}`引入"),
-            Self::TypeLiteral(inner_fields) => format!(
-                "實字物件（Object Literal，包含{}）",
-                inner_fields
-                    .iter()
-                    .map(|inner_value| format!("{inner_value}"))
-                    .collect::<Vec<String>>()
-                    .join("、")
-            ),
-            Self::LiteralTypes(types) => format!("實字（Literal）型別 \"{types}\"",),
-            Self::Any => String::from("任意（any）"),
-            Self::Unknown => String::from("未知（unknown）"),
-            Self::Number => String::from("數字（number）"),
-            Self::String => String::from("字串（string）"),
-            Self::Object => String::from("物件（Object）"),
-            Self::BigInt => String::from("大數字（bigint）"),
-            Self::Symbol => String::from("符號（Symbol）"),
-            Self::Void => String::from("沒有回傳值（void）"),
-            Self::Undefined => String::from("未初始化（undefined）"),
-            Self::Null => String::from("空值（null）"),
-            Self::Never => String::from("不預期的空值（never）"),
-            Self::Intrinsic => String::from("編譯用型別（Intrinsic）"),
-            Self::Boolean => String::from("布林（boolean）"),
-            Self::Other(raw_type) => format!("其他型別：{raw_type:?}"),
+            TSType::TSTypeLiteral(type_literal) => Self::TypeLiteral(Fields(
+                type_literal
+                    .unbox()
+                    .members
+                    .into_iter()
+                    .filter_map(|signature| {
+                        if let TSSignature::TSPropertySignature(property) = signature {
+                            Some(Field::from(property))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            )),
+            TSType::TSLiteralType(literal) => Self::LiteralTypes(LiteralType::from(literal)),
+            TSType::TSUnionType(union) => {
+                Self::Union(union.unbox().types.into_iter().map(Self::from).collect())
+            }
+            _ => Self::Other,
         }
     }
 }
 
-impl Display for ProcessedType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value())
-    }
-}
-
-#[allow(clippy::vec_box)]
-pub trait Sum {
-    fn get_fields(&self) -> Vec<Box<TsType>>;
-}
-impl Sum for TsUnionOrIntersectionType {
-    fn get_fields(&self) -> Vec<Box<TsType>> {
-        match self {
-            Self::TsUnionType(union) => union.get_fields(),
-            Self::TsIntersectionType(intersection) => intersection.get_fields(),
-        }
-    }
-}
-impl Sum for TsUnionType {
-    fn get_fields(&self) -> Vec<Box<TsType>> {
-        self.clone().types
-    }
-}
-impl Sum for TsIntersectionType {
-    fn get_fields(&self) -> Vec<Box<TsType>> {
-        self.clone().types
-    }
-}
-
+#[derive(Debug)]
 pub enum LiteralType {
     String(String),
     Boolean(bool),
     Number(f64),
     BigInt(String),
-    Template(Vec<ProcessedType>),
+    RegExp(String),
+    Template,
+    UnaryExpression,
+    Null,
 }
 
-impl Display for LiteralType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::String(ref str) => write!(f, "字串 \"{str}\""),
-            Self::Boolean(ref bool) => write!(f, "布林 {bool}"),
-            Self::Number(ref num) => write!(f, "數字 {num}"),
-            Self::BigInt(ref bigint) => write!(f, "大數字 {bigint}"),
-            Self::Template(ref template) => write!(
-                f,
-                "{}",
-                template
-                    .iter()
-                    .map(|inner_value| format!("{inner_value}"))
-                    .collect::<Vec<String>>()
-                    .join(", ")
+impl From<oxc::allocator::Box<'_, TSLiteralType<'_>>> for LiteralType {
+    fn from(value: oxc::allocator::Box<'_, TSLiteralType<'_>>) -> Self {
+        let value = value.unbox();
+
+        match value.literal {
+            TSLiteral::BooleanLiteral(boolean) => Self::Boolean(boolean.value),
+            TSLiteral::NullLiteral(_) => Self::Null,
+            TSLiteral::NumberLiteral(number) => Self::Number(number.value),
+            TSLiteral::BigintLiteral(bigint) => Self::BigInt(bigint.value.to_string()),
+            TSLiteral::RegExpLiteral(regexp) => Self::RegExp(regexp.regex.to_string()),
+            TSLiteral::StringLiteral(string) => Self::String(string.value.to_string()),
+            TSLiteral::TemplateLiteral(_) => Self::Template,
+            TSLiteral::UnaryExpression(_) => Self::UnaryExpression,
+        }
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Debug)]
+pub struct StructureName(String);
+
+impl Deref for StructureName {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<&Declaration<'_>> for StructureName {
+    type Error = io::Error;
+
+    fn try_from(value: &Declaration<'_>) -> Result<Self, Self::Error> {
+        match value {
+            Declaration::ClassDeclaration(class) => class.id.as_ref().map_or_else(
+                || {
+                    Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "Class name not found.",
+                    ))
+                },
+                |id| Ok(Self(id.name.to_string())),
             ),
+            Declaration::TSInterfaceDeclaration(interface) => {
+                Ok(Self(interface.id.name.to_string()))
+            }
+            Declaration::TSTypeAliasDeclaration(type_alias) => {
+                Ok(Self(type_alias.id.name.to_string()))
+            }
+            _ => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Type unsupported",
+            )),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Field {
+    pub name: String,
+    pub data_type: DataType,
+    pub optional: bool,
+}
+
+impl From<oxc::allocator::Box<'_, PropertyDefinition<'_>>> for Field {
+    fn from(value: oxc::allocator::Box<'_, PropertyDefinition<'_>>) -> Self {
+        let value = value.unbox();
+        Self {
+            name: match value.key {
+                PropertyKey::Identifier(id) => id.name.to_string(),
+                PropertyKey::PrivateIdentifier(id) => id.name.to_string(),
+                PropertyKey::Expression(_expr) => String::from("expr"),
+            },
+            data_type: value
+                .type_annotation
+                .map(|type_annotation| DataType::from(type_annotation.unbox().type_annotation))
+                .unwrap_or_default(),
+            optional: value.optional,
+        }
+    }
+}
+
+impl From<oxc::allocator::Box<'_, TSPropertySignature<'_>>> for Field {
+    fn from(value: oxc::allocator::Box<'_, TSPropertySignature<'_>>) -> Self {
+        let value = value.unbox();
+        Self {
+            name: match value.key {
+                PropertyKey::Identifier(id) => id.name.to_string(),
+                PropertyKey::PrivateIdentifier(id) => id.name.to_string(),
+                PropertyKey::Expression(_expr) => String::from("expr"),
+            },
+            data_type: value
+                .type_annotation
+                .map(|type_annotation| DataType::from(type_annotation.unbox().type_annotation))
+                .unwrap_or_default(),
+            optional: value.optional,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Fields(Vec<Field>);
+
+impl Deref for Fields {
+    type Target = Vec<Field>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<Declaration<'_>> for Fields {
+    type Error = io::Error;
+
+    fn try_from(value: Declaration<'_>) -> Result<Self, Self::Error> {
+        match value {
+            Declaration::ClassDeclaration(class) => Ok(Self(
+                class
+                    .unbox()
+                    .body
+                    .unbox()
+                    .body
+                    .into_iter()
+                    .filter_map(|element| {
+                        if let ClassElement::PropertyDefinition(property) = element {
+                            Some(Field::from(property))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            )),
+            Declaration::TSInterfaceDeclaration(interface) => Ok(Self(
+                interface
+                    .unbox()
+                    .body
+                    .unbox()
+                    .body
+                    .into_iter()
+                    .filter_map(|signature| {
+                        if let TSSignature::TSPropertySignature(property) = signature {
+                            Some(Field::from(property))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            )),
+            Declaration::TSTypeAliasDeclaration(type_alias) => {
+                if let DataType::TypeLiteral(type_literal) =
+                    DataType::from(type_alias.unbox().type_annotation)
+                {
+                    Ok(type_literal)
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Unable to parse the content of the type literal.",
+                    ))
+                }
+            }
+            _ => Err(io::Error::new(io::ErrorKind::Unsupported, "Unsupported.")),
+        }
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Debug)]
+pub enum StructureType {
+    Class,
+    Interface,
+    TypeAlias,
+}
+
+impl TryFrom<&Declaration<'_>> for StructureType {
+    type Error = io::Error;
+
+    fn try_from(value: &Declaration) -> Result<Self, Self::Error> {
+        match &value {
+            Declaration::ClassDeclaration(_) => Ok(Self::Class),
+            Declaration::TSInterfaceDeclaration(_) => Ok(Self::Interface),
+            Declaration::TSTypeAliasDeclaration(_) => Ok(Self::TypeAlias),
+            _ => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Type Unsupported.",
+            )),
         }
     }
 }
